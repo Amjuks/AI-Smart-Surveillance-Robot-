@@ -1,0 +1,53 @@
+app:
+  title: "AI Smart Surveillance Robot Dashboard"
+  host: "0.0.0.0"
+  port: 8000
+  log_level: "info"
+
+network:
+  robot_base_url: "http://192.168.0.11"
+  camera_stream_url: "http://192.168.0.8/stream"
+  request_timeout_seconds: 2.0
+
+vision:
+  model_path: "yolov8n.pt"
+  confidence_threshold: 0.28
+  input_size: 640
+  target_fps: 4
+  frame_jpeg_quality: 80
+  live_stream_enabled: true
+  object_refresh_seconds: 5
+  max_lost_target_seconds: 4
+  suspicious_motion_threshold_pixels: 120
+  camera_retry_seconds: 5
+  still_frame_refresh_seconds: 1.5
+  dashboard_refresh_seconds: 3
+  detection_hold_seconds: 5
+  detection_match_iou: 0.28
+  detection_center_match_px: 120
+  detection_confidence_decay_per_second: 0.18
+  capture_fps: 8
+
+tracking:
+  desired_distance_m: 1.8
+  distance_reference_width_px: 180
+  stop_tolerance_m: 0.2
+  forward_distance_threshold_m: 2.1
+  reverse_distance_threshold_m: 1.2
+  center_tolerance_px: 70
+  command_cooldown_seconds: 0.6
+
+alerts:
+  email_enabled: false
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  username: "your-email@example.com"
+  password: "app-password"
+  from_email: "your-email@example.com"
+  to_email: "receiver@example.com"
+
+history:
+  max_commands: 200
+  max_alerts: 100
+  max_frames_for_debug: 5
+  max_route_points: 1000
