@@ -27,6 +27,11 @@ vision:
   detection_center_match_px: 120
   detection_confidence_decay_per_second: 0.18
   capture_fps: 8
+  tracker_fallback_enabled: true
+  tracker_template_match_threshold: 0.58
+  tracker_search_padding_px: 140
+  tracker_max_age_seconds: 2.2
+  tracker_template_min_size_px: 24
 
 tracking:
   desired_distance_m: 1.8

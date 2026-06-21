@@ -71,6 +71,20 @@ class VisionEngine:
         self._latest_frame: np.ndarray | None = None
         self._latest_frame_seq = 0
         self._latest_frame_at = 0.0
+        self._tracked_template_gray: np.ndarray | None = None
+        self._tracked_bbox: list[int] | None = None
+        self._tracked_label: str | None = None
+        self._tracked_color: str | None = None
+        self._tracked_detection_id: str | None = None
+        self._tracked_last_seen: object | None = None
+
+    def clear_tracking_memory(self) -> None:
+        self._tracked_template_gray = None
+        self._tracked_bbox = None
+        self._tracked_label = None
+        self._tracked_color = None
+        self._tracked_detection_id = None
+        self._tracked_last_seen = None
 
     def start(self) -> None:
         if self.capture_thread and self.capture_thread.is_alive():
@@ -377,6 +391,9 @@ class VisionEngine:
             return None
 
         if tracked is None:
+            tracked = self._recover_target_with_template(frame, selected_target_label, selected_target_type, selected_target_value)
+
+        if tracked is None:
             tracking_status.state = "Target Lost"
             tracking_status.target = TrackingTarget(
                 label=selected_target_label,
@@ -415,6 +432,8 @@ class VisionEngine:
             self.state.last_target_seen_at = now_local()
             self.state.previous_target_center_x = tracked.center[0]
 
+        self._update_tracker_memory(frame, tracked)
+
         if mode == "tracking":
             success, reason = self.robot.send_command(action)
             self._log_command(action, f"Tracking: {direction} / {reason}", tracked, success)
@@ -422,6 +441,95 @@ class VisionEngine:
                 self.state.robot_connected = success
 
         return tracked
+
+    def _update_tracker_memory(self, frame: np.ndarray, detection: Detection) -> None:
+        x1, y1, x2, y2 = detection.bbox
+        x1 = max(x1, 0)
+        y1 = max(y1, 0)
+        x2 = min(x2, frame.shape[1])
+        y2 = min(y2, frame.shape[0])
+        if x2 - x1 < self.settings.vision.tracker_template_min_size_px:
+            return
+        if y2 - y1 < self.settings.vision.tracker_template_min_size_px:
+            return
+
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return
+
+        template_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        if self._tracked_template_gray is None:
+            self._tracked_template_gray = template_gray
+        else:
+            resized_previous = cv2.resize(self._tracked_template_gray, (template_gray.shape[1], template_gray.shape[0]))
+            self._tracked_template_gray = cv2.addWeighted(resized_previous, 0.3, template_gray, 0.7, 0)
+        self._tracked_bbox = [x1, y1, x2, y2]
+        self._tracked_label = detection.label
+        self._tracked_color = detection.dominant_color
+        self._tracked_detection_id = detection.detection_id
+        self._tracked_last_seen = now_local()
+
+    def _recover_target_with_template(
+        self,
+        frame: np.ndarray,
+        selected_target_label: str,
+        selected_target_type: str,
+        selected_target_value: str | None,
+    ) -> Detection | None:
+        if not self.settings.vision.tracker_fallback_enabled:
+            return None
+        if self._tracked_template_gray is None or self._tracked_bbox is None or self._tracked_last_seen is None:
+            return None
+        if (now_local() - self._tracked_last_seen).total_seconds() > self.settings.vision.tracker_max_age_seconds:
+            return None
+
+        x1, y1, x2, y2 = self._tracked_bbox
+        padding = self.settings.vision.tracker_search_padding_px
+        sx1 = max(x1 - padding, 0)
+        sy1 = max(y1 - padding, 0)
+        sx2 = min(x2 + padding, frame.shape[1])
+        sy2 = min(y2 + padding, frame.shape[0])
+        search = frame[sy1:sy2, sx1:sx2]
+        if search.size == 0:
+            return None
+
+        search_gray = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
+        template = self._tracked_template_gray
+        if search_gray.shape[0] < template.shape[0] or search_gray.shape[1] < template.shape[1]:
+            return None
+
+        result = cv2.matchTemplate(search_gray, template, cv2.TM_CCOEFF_NORMED)
+        _, score, _, max_loc = cv2.minMaxLoc(result)
+        if score < self.settings.vision.tracker_template_match_threshold:
+            return None
+
+        tx1 = sx1 + max_loc[0]
+        ty1 = sy1 + max_loc[1]
+        tx2 = tx1 + template.shape[1]
+        ty2 = ty1 + template.shape[0]
+        crop = frame[ty1:ty2, tx1:tx2]
+        if crop.size == 0:
+            return None
+
+        dominant_color = self._dominant_color_name(crop)
+        if selected_target_type == "color" and selected_target_value and dominant_color != selected_target_value:
+            return None
+
+        width = max(tx2 - tx1, 1)
+        distance_m = round(
+            (self.settings.tracking.distance_reference_width_px / width) * self.settings.tracking.desired_distance_m,
+            2,
+        )
+        return Detection(
+            detection_id=self._tracked_detection_id or str(uuid.uuid4())[:8],
+            label=self._tracked_label or selected_target_label,
+            confidence=round(float(score), 3),
+            distance_m=distance_m,
+            dominant_color=dominant_color,
+            bbox=[tx1, ty1, tx2, ty2],
+            center=[(tx1 + tx2) // 2, (ty1 + ty2) // 2],
+            area=max((tx2 - tx1) * (ty2 - ty1), 1),
+        )
 
     def _choose_robot_action(self, direction: str, distance_m: float | None) -> str:
         if direction == "Left":

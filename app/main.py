@@ -198,6 +198,7 @@ async def get_tracking() -> JSONResponse:
 
 @app.post("/api/track")
 async def select_target(payload: TargetSelection) -> JSONResponse:
+    vision_engine.clear_tracking_memory()
     with state.lock:
         state.selected_target_id = payload.detection_id
         state.selected_target_label = payload.label
@@ -230,6 +231,7 @@ async def set_mode(payload: ModeRequest) -> JSONResponse:
         state.mode = payload.mode
         state.robot_connected = success
         if payload.mode == "manual":
+            vision_engine.clear_tracking_memory()
             state.selected_target_id = None
             state.selected_target_label = None
             state.selected_target_type = "object"
@@ -345,31 +347,6 @@ async def get_latest_frame() -> StreamingResponse:
         ok, encoded = cv2.imencode(".jpg", blank)
         frame = encoded.tobytes() if ok else b""
     return StreamingResponse(io.BytesIO(frame), media_type="image/jpeg")
-
-
-@app.get("/api/live-feed")
-async def live_feed_proxy() -> StreamingResponse:
-    import requests
-
-    def generator():
-        try:
-            with requests.get(
-                settings.network.camera_stream_url,
-                stream=True,
-                timeout=settings.network.request_timeout_seconds,
-            ) as response:
-                response.raise_for_status()
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        yield chunk
-        except Exception:
-            blank = np.zeros((360, 640, 3), dtype=np.uint8)
-            cv2.putText(blank, "Live feed unavailable", (150, 180), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (220, 220, 220), 2)
-            ok, encoded = cv2.imencode(".jpg", blank)
-            if ok:
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + encoded.tobytes() + b"\r\n"
-
-    return StreamingResponse(generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.post("/api/demo-alert")

@@ -76,8 +76,8 @@ function renderVideoFeedPreference(videoFeed) {
   els.liveViewToggle.checked = state.liveViewEnabled;
   if (!state.liveViewEnabled) {
     els.videoFeed.src = "/api/frame.jpg?disabled=1";
-  } else if (!els.videoFeed.src.includes("/api/live-feed")) {
-    els.videoFeed.src = "/api/live-feed";
+  } else if (!els.videoFeed.src.includes("/api/frame.jpg")) {
+    els.videoFeed.src = `/api/frame.jpg?ts=${Date.now()}`;
   }
 }
 
@@ -318,9 +318,7 @@ async function refreshDashboard() {
 
 function refreshFrame() {
   if (!state.liveViewEnabled) return;
-  if (!els.videoFeed.src.includes("/api/live-feed")) {
-    els.videoFeed.src = "/api/live-feed";
-  }
+  els.videoFeed.src = `/api/frame.jpg?ts=${Date.now()}`;
 }
 
 async function sendManualCommand(command) {

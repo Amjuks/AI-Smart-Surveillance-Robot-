@@ -41,6 +41,11 @@ class VisionConfig(BaseModel):
     detection_center_match_px: int = 120
     detection_confidence_decay_per_second: float = 0.18
     capture_fps: int = 6
+    tracker_fallback_enabled: bool = True
+    tracker_template_match_threshold: float = 0.58
+    tracker_search_padding_px: int = 140
+    tracker_max_age_seconds: float = 2.2
+    tracker_template_min_size_px: int = 24
 
 
 class TrackingConfig(BaseModel):
