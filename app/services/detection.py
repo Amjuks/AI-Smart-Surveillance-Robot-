@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 import requests
-from ultralytics import YOLO
 
 from app.config import Settings
 from app.models import AlertEntry, CommandEntry, Detection, TrackingTarget
@@ -61,7 +60,6 @@ class VisionEngine:
         self.robot = robot
         self.mailer = mailer
         self.tracker = TargetTracker(settings)
-        self.model: YOLO | None = None
         self.capture_thread: threading.Thread | None = None
         self.inference_thread: threading.Thread | None = None
         self._running = False
@@ -91,7 +89,7 @@ class VisionEngine:
             return
         self._running = True
         self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True, name="camera-capture")
-        self.inference_thread = threading.Thread(target=self._inference_loop, daemon=True, name="yolo-inference")
+        self.inference_thread = threading.Thread(target=self._inference_loop, daemon=True, name="black-object-inference")
         self.capture_thread.start()
         self.inference_thread.start()
 
@@ -178,7 +176,7 @@ class VisionEngine:
                 elapsed = max(time.time() - start_time, 1e-6)
                 fps = frame_count / elapsed
 
-                raw_detections = self._detect_objects(frame)
+                raw_detections = self._detect_black_objects(frame)
                 detections = self._stabilize_detections(raw_detections)
                 live_detections = [item for item in detections if not item.stale]
                 tracked_detection = self._handle_tracking(frame, live_detections)
@@ -208,62 +206,58 @@ class VisionEngine:
                 self._raise_alert("critical", "Backend error", f"Vision inference error: {exc}", cooldown_seconds=30)
                 time.sleep(0.3)
 
-    def _detect_objects(self, frame: np.ndarray) -> list[Detection]:
-        model = self._get_model()
-        prepared = self._prepare_frame_for_detection(frame)
-        results = model.predict(
-            source=prepared,
-            conf=self.settings.vision.confidence_threshold,
-            imgsz=self.settings.vision.input_size,
-            verbose=False,
-        )
+    def _detect_black_objects(self, frame: np.ndarray) -> list[Detection]:
+        mask = self._build_black_mask(frame)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         detections: list[Detection] = []
+        frame_area = max(frame.shape[0] * frame.shape[1], 1)
 
-        for result in results:
-            names = result.names
-            for box in result.boxes:
-                x1, y1, x2, y2 = [int(value) for value in box.xyxy[0].tolist()]
-                confidence = float(box.conf[0].item())
-                label = names[int(box.cls[0].item())]
-                crop = frame[max(y1, 0) : max(y2, 0), max(x1, 0) : max(x2, 0)]
-                dominant_color = self._dominant_color_name(crop)
-                width = max(x2 - x1, 1)
-                distance_m = round(
-                    (self.settings.tracking.distance_reference_width_px / width) * self.settings.tracking.desired_distance_m,
-                    2,
-                )
-                detections.append(
-                    Detection(
-                        detection_id=str(uuid.uuid4())[:8],
-                        label=label,
-                        confidence=round(confidence, 3),
-                        distance_m=distance_m,
-                        dominant_color=dominant_color,
-                        bbox=[x1, y1, x2, y2],
-                        center=[(x1 + x2) // 2, (y1 + y2) // 2],
-                        area=width * max(y2 - y1, 1),
-                    )
-                )
+        for contour in contours:
+            area = int(cv2.contourArea(contour))
+            if area < self.settings.vision.min_black_area_px:
+                continue
 
-        detections.sort(key=lambda item: item.confidence, reverse=True)
+            x, y, w, h = cv2.boundingRect(contour)
+            x1, y1, x2, y2 = x, y, x + w, y + h
+            crop = frame[max(y1, 0) : max(y2, 0), max(x1, 0) : max(x2, 0)]
+            if crop.size == 0:
+                continue
+
+            fill_ratio = min(area / max(w * h, 1), 1.0)
+            size_ratio = min((w * h) / frame_area, 1.0)
+            confidence = round(min(0.55 + (fill_ratio * 0.3) + (size_ratio * 0.15), 0.99), 3)
+            distance_m = round(
+                (self.settings.tracking.distance_reference_width_px / max(w, 1)) * self.settings.tracking.desired_distance_m,
+                2,
+            )
+            detections.append(
+                Detection(
+                    detection_id=str(uuid.uuid4())[:8],
+                    label="Black Object",
+                    confidence=confidence,
+                    distance_m=distance_m,
+                    dominant_color="Black",
+                    bbox=[x1, y1, x2, y2],
+                    center=[x1 + (w // 2), y1 + (h // 2)],
+                    area=max(w * h, 1),
+                )
+            )
+
+        detections.sort(key=lambda item: item.area, reverse=True)
         return detections
 
-    def _prepare_frame_for_detection(self, frame: np.ndarray) -> np.ndarray:
-        # Improve stability under weak lighting and slight blur without making inference much heavier.
-        resized = frame.copy()
-        lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        balanced = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
-        denoised = cv2.GaussianBlur(balanced, (0, 0), 1.0)
-        sharpened = cv2.addWeighted(balanced, 1.35, denoised, -0.35, 0)
-        return sharpened
+    def _build_black_mask(self, frame: np.ndarray) -> np.ndarray:
+        blurred = cv2.GaussianBlur(frame, (5, 5), 0)
+        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        value_mask = cv2.inRange(hsv[:, :, 2], 0, self.settings.vision.black_value_threshold)
+        saturation_mask = cv2.inRange(hsv[:, :, 1], 0, self.settings.vision.black_saturation_threshold)
+        mask = cv2.bitwise_and(value_mask, saturation_mask)
 
-    def _get_model(self) -> YOLO:
-        if self.model is None:
-            self.model = YOLO(self.settings.vision.model_path)
-        return self.model
+        kernel_size = max(self.settings.vision.morph_kernel_size, 1)
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        return mask
 
     def _stabilize_detections(self, detections: list[Detection]) -> list[Detection]:
         now = now_local()
@@ -322,7 +316,7 @@ class VisionEngine:
             for memory in self._detection_memory
             if (now - memory.last_seen).total_seconds() <= self.settings.vision.detection_hold_seconds
         ]
-        visible.sort(key=lambda item: (item.stale, -item.confidence, item.age_seconds))
+        visible.sort(key=lambda item: (item.stale, -item.area, item.age_seconds))
         return visible
 
     def _match_memory(self, detection: Detection, used_memory_ids: set[str]) -> DetectionMemory | None:
@@ -410,7 +404,7 @@ class VisionEngine:
             detection_id=tracked.detection_id,
             label=tracked.label,
             target_type=selected_target_type,
-            target_value=selected_target_value or (tracked.dominant_color if selected_target_type == "color" else tracked.label),
+            target_value=selected_target_value or tracked.label,
             dominant_color=tracked.dominant_color,
             confidence=tracked.confidence,
             distance_m=tracked.distance_m,
@@ -594,41 +588,15 @@ class VisionEngine:
         if crop.size == 0:
             return "Unknown"
 
-        resized = cv2.resize(crop, (64, 64))
-        lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        normalized = cv2.merge((l, a, b))
-        bgr = cv2.cvtColor(normalized, cv2.COLOR_LAB2BGR)
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-
-        saturation = hsv[:, :, 1].astype(np.float32)
-        value = hsv[:, :, 2].astype(np.float32)
-        weights = np.clip((saturation / 255.0) * 0.7 + (value / 255.0) * 0.3, 0.1, 1.0)
-
-        pixels = bgr.reshape(-1, 3).astype(np.float32)
-        weighted_mean = (pixels * weights.reshape(-1, 1)).sum(axis=0) / weights.sum()
-        blue, green, red = weighted_mean
-
-        if value.mean() < 40:
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        mean_value = float(hsv[:, :, 2].mean())
+        mean_saturation = float(hsv[:, :, 1].mean())
+        if mean_value <= self.settings.vision.black_value_threshold and mean_saturation <= self.settings.vision.black_saturation_threshold:
             return "Black"
-        if value.mean() > 200 and saturation.mean() < 35:
+        if mean_value > 200 and mean_saturation < 35:
             return "White"
-        if saturation.mean() < 30:
+        if mean_saturation < 30:
             return "Grey"
-        if red > green * 1.2 and red > blue * 1.2:
-            return "Red"
-        if green > red * 1.1 and green > blue * 1.1:
-            return "Green"
-        if blue > red * 1.1 and blue > green * 1.1:
-            return "Blue"
-        if red > 150 and green > 120 and blue < 110:
-            return "Yellow"
-        if red > 150 and blue > 100:
-            return "Purple"
-        if red > 150 and green > 80 and blue < 80:
-            return "Orange"
         return "Mixed"
 
     def _log_command(self, command: str, reason: str, detection: Detection | None, success: bool) -> None:

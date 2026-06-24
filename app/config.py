@@ -24,9 +24,10 @@ class NetworkConfig(BaseModel):
 class VisionConfig(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
-    model_path: str = "yolov8n.pt"
-    confidence_threshold: float = 0.45
-    input_size: int = 640
+    black_value_threshold: int = 60
+    black_saturation_threshold: int = 110
+    min_black_area_px: int = 900
+    morph_kernel_size: int = 5
     target_fps: int = 12
     frame_jpeg_quality: int = 80
     live_stream_enabled: bool = True

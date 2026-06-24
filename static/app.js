@@ -96,7 +96,7 @@ function objectDetails(obj) {
   return [
     `Confidence: <strong>${(obj.confidence * 100).toFixed(1)}%</strong>`,
     `Distance: <strong>${obj.distance_m ? `${obj.distance_m.toFixed(2)} m` : "--"}</strong>`,
-    `Dominant Color: <strong>${obj.dominant_color || "Unknown"}</strong>`,
+    `Detected Color: <strong>${obj.dominant_color || "Unknown"}</strong>`,
     `Center: <strong>${obj.center.join(", ")}</strong>`,
     `Status: <strong>${obj.stale ? `Holding ${obj.age_seconds.toFixed(1)}s` : "Live"}</strong>`,
   ]
@@ -104,44 +104,20 @@ function objectDetails(obj) {
     .join("");
 }
 
-function buildColorTargets(objects) {
-  const colorMap = new Map();
-  objects
-    .filter((obj) => obj.dominant_color && obj.dominant_color !== "Unknown")
-    .forEach((obj) => {
-      const existing = colorMap.get(obj.dominant_color);
-      if (!existing || obj.confidence > existing.confidence) {
-        colorMap.set(obj.dominant_color, {
-          color: obj.dominant_color,
-          confidence: obj.confidence,
-          distance_m: obj.distance_m,
-          count: (existing?.count || 0) + 1,
-        });
-      } else {
-        existing.count += 1;
-      }
-    });
-  return [...colorMap.values()];
-}
-
 function renderObjects(objects, tracking) {
   state.lastObjects = objects;
   if (!objects.length) {
     els.objectsContainer.innerHTML = `<div class="empty-state">${
-      state.cameraStatus === "Online" ? "No objects detected yet" : "Camera offline or unreachable, so detections are paused"
+      state.cameraStatus === "Online" ? "No black objects detected yet" : "Camera offline or unreachable, so detections are paused"
     }</div>`;
     return;
   }
 
   const selectedId = tracking?.target?.detection_id;
-  const selectedLabel = tracking?.target?.label;
-  const selectedType = tracking?.target?.target_type || "object";
-  const selectedValue = tracking?.target?.target_value || selectedLabel;
-  const colorTargets = buildColorTargets(objects);
 
   const objectMarkup = objects
     .map((obj) => {
-      const isActive = obj.detection_id === selectedId || obj.label === selectedLabel;
+      const isActive = obj.detection_id === selectedId;
       const statePill = obj.stale ? "Holding" : isActive ? "Active Target" : "Available Target";
       const pillClass = obj.stale ? "warning" : "";
       return `
@@ -168,52 +144,7 @@ function renderObjects(objects, tracking) {
     })
     .join("");
 
-  const colorMarkup = colorTargets.length
-    ? `
-      <div class="color-targets-block">
-        <div class="panel-head compact">
-          <div>
-            <p class="eyebrow">Color Targets</p>
-            <h3>Track by Dominant Color</h3>
-          </div>
-        </div>
-        <div class="objects-list">
-          ${colorTargets
-            .map((target) => {
-              const isActive = selectedType === "color" && selectedValue === target.color;
-              return `
-                <article class="object-card">
-                  <header>
-                    <div>
-                      <h3>${target.color}</h3>
-                      <div class="pill ${isActive ? "" : ""}">${target.count} match${target.count > 1 ? "es" : ""}</div>
-                    </div>
-                    <button
-                      class="btn secondary track-btn"
-                      data-id=""
-                      data-label="${target.color}"
-                      data-type="color"
-                      data-value="${target.color}"
-                      ${state.actionPending ? "disabled" : ""}
-                    >
-                      ${isActive && state.mode === "tracking" ? "Tracking" : "Track"}
-                    </button>
-                  </header>
-                  <div class="object-meta">
-                    <span>Confidence: <strong>${(target.confidence * 100).toFixed(1)}%</strong></span>
-                    <span>Distance: <strong>${target.distance_m ? `${target.distance_m.toFixed(2)} m` : "--"}</strong></span>
-                    <span>Mode: <strong>Color Tracking</strong></span>
-                  </div>
-                </article>
-              `;
-            })
-            .join("")}
-        </div>
-      </div>
-    `
-    : "";
-
-  els.objectsContainer.innerHTML = objectMarkup + colorMarkup;
+  els.objectsContainer.innerHTML = objectMarkup;
 
   document.querySelectorAll(".track-btn").forEach((button) => {
     button.addEventListener("click", async () => {

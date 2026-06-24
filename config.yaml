@@ -5,24 +5,25 @@ app:
   log_level: "info"
 
 network:
-  robot_base_url: "http://192.168.0.11"
-  camera_stream_url: "http://192.168.0.8/stream"
+  robot_base_url: "http://10.205.240.179"
+  camera_stream_url: "http://10.205.240.3/stream"
   request_timeout_seconds: 2.0
 
 vision:
-  model_path: "yolov8n.pt"
-  confidence_threshold: 0.28
-  input_size: 640
-  target_fps: 4
+  black_value_threshold: 60
+  black_saturation_threshold: 110
+  min_black_area_px: 900
+  morph_kernel_size: 5
+  target_fps: 8
   frame_jpeg_quality: 80
   live_stream_enabled: true
   object_refresh_seconds: 5
   max_lost_target_seconds: 4
   suspicious_motion_threshold_pixels: 120
-  camera_retry_seconds: 5
-  still_frame_refresh_seconds: 1.5
+  camera_retry_seconds: 3
+  still_frame_refresh_seconds: 1
   dashboard_refresh_seconds: 3
-  detection_hold_seconds: 5
+  detection_hold_seconds: 3
   detection_match_iou: 0.28
   detection_center_match_px: 120
   detection_confidence_decay_per_second: 0.18
