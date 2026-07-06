@@ -71,15 +71,13 @@ body {
 
 .header-panel,
 .top-layout,
-.mid-layout,
 .bottom-layout {
   display: grid;
   gap: 24px;
 }
 
 .top-layout {
-  grid-template-columns: 1.6fr 0.9fr;
-  align-items: start;
+  grid-template-columns: 1fr;
 }
 
 .bottom-layout {
@@ -185,7 +183,30 @@ h2 {
 .objects-panel,
 .history-panel {
   display: grid;
-  gap: 20px;
+  gap: 24px;
+}
+
+.camera-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.72fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.camera-stage,
+.control-dock {
+  display: grid;
+  gap: 18px;
+}
+
+.control-dock {
+  align-content: start;
+}
+
+.camera-meta-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 18px;
 }
 
 .panel-head {
@@ -210,7 +231,7 @@ h2 {
   position: relative;
   overflow: hidden;
   border-radius: 22px;
-  min-height: 420px;
+  min-height: 480px;
   background: #050a13;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -235,6 +256,19 @@ h2 {
   );
   mix-blend-mode: soft-light;
   pointer-events: none;
+}
+
+.camera-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .mode-toggle {
@@ -277,14 +311,8 @@ h2 {
   background: linear-gradient(135deg, rgba(82, 242, 197, 0.6), rgba(98, 212, 255, 0.6));
 }
 
-.controls-row {
-  display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
-  gap: 16px;
-}
-
 .inset {
-  padding: 16px;
+  padding: 18px;
 }
 
 .tracking-metrics,
@@ -299,14 +327,36 @@ h2 {
   width: 100%;
 }
 
+.tracking-card,
+.config-card,
+.manual-dock {
+  display: grid;
+  gap: 16px;
+}
+
+.tracking-card h3,
+.config-card h3 {
+  margin-bottom: 0;
+}
+
 .manual-controls {
   display: grid;
   grid-template-areas:
     ". up ."
     "left stop right"
     ". down .";
-  gap: 12px;
+  gap: 14px;
   justify-items: stretch;
+  align-content: center;
+  min-height: 100%;
+}
+
+.manual-dock h3 {
+  margin-bottom: 0;
+}
+
+.manual-dock {
+  min-height: 100%;
 }
 
 .up { grid-area: up; }
@@ -338,6 +388,11 @@ h2 {
 .control {
   background: linear-gradient(135deg, rgba(98, 212, 255, 0.18), rgba(82, 242, 197, 0.18));
   border: 1px solid rgba(98, 212, 255, 0.28);
+}
+
+.control {
+  min-height: 64px;
+  font-weight: 600;
 }
 
 .object-card,
@@ -472,11 +527,19 @@ th {
 }
 
 @media (max-width: 1080px) {
-  .top-layout,
   .bottom-layout,
-  .controls-row,
+  .camera-workspace,
+  .camera-meta-grid,
   .map-panel {
     grid-template-columns: 1fr;
+  }
+
+  .control-dock {
+    order: 0;
+  }
+
+  .video-frame {
+    min-height: 360px;
   }
 }
 
@@ -495,5 +558,33 @@ th {
 
   .video-frame {
     min-height: 280px;
+  }
+
+  .camera-caption,
+  .panel-head,
+  .header-toggles {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .camera-panel,
+  .camera-workspace,
+  .camera-stage,
+  .control-dock,
+  .camera-meta-grid {
+    gap: 16px;
+  }
+
+  .manual-controls {
+    grid-template-areas:
+      "up up"
+      "left right"
+      "stop stop"
+      "down down";
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .map-panel.wide img {
+    min-height: 300px;
   }
 }

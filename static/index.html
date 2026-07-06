@@ -37,7 +37,7 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Vision Feed</p>
-              <h2>Annotated Live Camera</h2>
+              <h2>Live View and Quick Controls</h2>
             </div>
             <div class="header-toggles">
               <label class="mode-toggle">
@@ -52,12 +52,39 @@
               </label>
             </div>
           </div>
-          <div class="video-frame">
-            <img id="videoFeed" src="/api/frame.jpg" alt="Robot camera frame" />
-            <div class="scanlines"></div>
+
+          <div class="camera-workspace">
+            <div class="camera-stage">
+              <div class="video-frame">
+                <img id="videoFeed" src="/api/frame.jpg" alt="Robot camera frame" />
+                <div class="scanlines"></div>
+              </div>
+              <div class="camera-caption">
+                <span>Backend-served annotated frame for stable viewing and lighter ESP32 load.</span>
+                <span class="mono">Keyboard: Arrow Keys to move, Space to stop</span>
+              </div>
+            </div>
+
+            <aside class="control-dock">
+              <div class="glass inset manual-dock">
+                <div class="panel-head compact">
+                  <div>
+                    <p class="eyebrow">Manual Control</p>
+                    <h3>Drive the Robot</h3>
+                  </div>
+                </div>
+                <div class="manual-controls">
+                  <button class="btn control up" data-command="F">Forward</button>
+                  <button class="btn control left" data-command="L">Left</button>
+                  <button class="btn control stop" data-command="S">Stop</button>
+                  <button class="btn control right" data-command="R">Right</button>
+                  <button class="btn control down" data-command="B">Backward</button>
+                </div>
+              </div>
+            </aside>
           </div>
 
-          <div class="controls-row">
+          <div class="camera-meta-grid">
             <div class="glass inset tracking-card">
               <p class="eyebrow">Tracking</p>
               <h3 id="trackingState">No Target Selected</h3>
@@ -81,17 +108,9 @@
               </div>
             </div>
           </div>
-
-          <div class="manual-controls">
-            <button class="btn control up" data-command="F">Forward</button>
-            <button class="btn control left" data-command="L">Left</button>
-            <button class="btn control stop" data-command="S">Stop</button>
-            <button class="btn control right" data-command="R">Right</button>
-            <button class="btn control down" data-command="B">Backward</button>
-          </div>
         </div>
 
-        <aside class="glass panel objects-panel">
+        <section class="glass panel objects-panel">
           <div class="panel-head">
             <div>
               <p class="eyebrow">Detected Objects</p>
@@ -104,7 +123,7 @@
             <div class="skeleton-card"></div>
             <div class="skeleton-card"></div>
           </div>
-        </aside>
+        </section>
       </section>
 
       <section class="glass panel map-wide-panel">
