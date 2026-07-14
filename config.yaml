@@ -5,18 +5,23 @@ app:
   log_level: "info"
 
 network:
-  robot_base_url: "http://10.205.240.179"
-  camera_stream_url: "http://10.205.240.3/stream"
-  request_timeout_seconds: 2.0
+  robot_base_url: "http://172.28.209.179"
+  camera_stream_url: "http://172.28.209.3/stream"
+  request_timeout_seconds: 10.0
 
 vision:
   black_value_threshold: 60
   black_saturation_threshold: 110
   min_black_area_px: 900
   morph_kernel_size: 5
-  target_fps: 8
-  frame_jpeg_quality: 80
+  target_fps: 30
+  frame_jpeg_quality: 40
   live_stream_enabled: true
+  model_weights: "yolov8n.pt"
+  model_confidence: 0.35
+  model_iou_threshold: 0.25
+  model_max_det: 25
+  model_device: "cpu"
   object_refresh_seconds: 5
   max_lost_target_seconds: 4
   suspicious_motion_threshold_pixels: 120
@@ -42,6 +47,17 @@ tracking:
   reverse_distance_threshold_m: 1.2
   center_tolerance_px: 70
   command_cooldown_seconds: 0.6
+  forward_duration_seconds: 0.1
+  backward_duration_seconds: 0.1
+  left_duration_seconds: 5
+  right_duration_seconds: 5
+  forward_distance_m: 0.45
+  backward_distance_m: 0.45
+  left_turn_degrees: 14.0
+  right_turn_degrees: 14.0
+  origin_latitude: null
+  origin_longitude: null
+  start_heading_degrees: 0.0
 
 alerts:
   email_enabled: false

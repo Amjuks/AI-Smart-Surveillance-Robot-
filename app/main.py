@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import io
 from contextlib import asynccontextmanager
 
 import cv2
 import numpy as np
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -15,8 +17,8 @@ from app.models import (
     AlertEntry,
     CommandEntry,
     CommandRequest,
-    DistanceConfigRequest,
     ModeRequest,
+    OriginConfigRequest,
     StatusResponse,
     TargetSelection,
     VideoFeedConfigRequest,
@@ -185,6 +187,10 @@ async def get_dashboard() -> JSONResponse:
             "video_feed": {
                 "enabled": state.live_stream_enabled,
             },
+            "origin": {
+                "latitude": settings.tracking.origin_latitude,
+                "longitude": settings.tracking.origin_longitude,
+            },
         }
     return JSONResponse(jsonable_encoder(payload))
 
@@ -263,6 +269,7 @@ async def manual_command(payload: CommandRequest) -> JSONResponse:
             raise HTTPException(status_code=409, detail="Manual commands are allowed only in manual mode.")
     success, message = robot.send_command(payload.command)
     state.robot_connected = success
+    movement_amount_m, rotation_degrees = robot.movement_metadata(payload.command)
     state.add_command(
         CommandEntry(
             timestamp=now_local(),
@@ -272,6 +279,8 @@ async def manual_command(payload: CommandRequest) -> JSONResponse:
             estimated_distance_m=state.tracking_status.target.distance_m if state.tracking_status else None,
             direction=state.tracking_status.target.direction if state.tracking_status else None,
             mode="manual",
+            movement_amount_m=movement_amount_m,
+            rotation_degrees=rotation_degrees,
             success=success,
         )
     )
@@ -292,6 +301,16 @@ async def set_video_feed(payload: VideoFeedConfigRequest) -> JSONResponse:
         state.live_stream_enabled = payload.enabled
     settings.vision.live_stream_enabled = payload.enabled
     return JSONResponse(jsonable_encoder({"ok": True, "enabled": payload.enabled}))
+
+
+@app.post("/api/config/origin")
+async def set_origin(payload: OriginConfigRequest) -> JSONResponse:
+    with state.lock:
+        settings.tracking.origin_latitude = payload.latitude
+        settings.tracking.origin_longitude = payload.longitude
+        state.estimator.origin_latitude = payload.latitude
+        state.estimator.origin_longitude = payload.longitude
+    return JSONResponse(jsonable_encoder({"ok": True, "origin": payload.model_dump()}))
 
 
 @app.get("/api/history")
@@ -347,6 +366,37 @@ async def get_latest_frame() -> StreamingResponse:
         ok, encoded = cv2.imencode(".jpg", blank)
         frame = encoded.tobytes() if ok else b""
     return StreamingResponse(io.BytesIO(frame), media_type="image/jpeg")
+
+
+@app.get("/api/camera-stream")
+async def proxy_camera_stream() -> StreamingResponse:
+    boundary = b"frame"
+
+    async def frame_generator():
+        while True:
+            with state.lock:
+                frame = state.latest_frame_jpeg
+                live_stream_enabled = state.live_stream_enabled
+
+            if not live_stream_enabled or not frame:
+                blank = np.zeros((360, 640, 3), dtype=np.uint8)
+                text = "Camera stream unavailable" if not frame else "Live stream disabled"
+                cv2.putText(blank, text, (60, 180), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (220, 220, 220), 2)
+                ok, encoded = cv2.imencode(".jpg", blank)
+                frame_bytes = encoded.tobytes() if ok else b""
+            else:
+                frame_bytes = frame
+
+            if frame_bytes:
+                yield b"--" + boundary + b"\r\n"
+                yield b"Content-Type: image/jpeg\r\n"
+                yield f"Content-Length: {len(frame_bytes)}\r\n\r\n".encode("utf-8")
+                yield frame_bytes
+                yield b"\r\n"
+
+            await asyncio.sleep(1.0 / max(settings.vision.capture_fps, 1))
+
+    return StreamingResponse(frame_generator(), media_type=f"multipart/x-mixed-replace; boundary={boundary.decode()}")
 
 
 @app.post("/api/demo-alert")

@@ -31,6 +31,11 @@ class VisionConfig(BaseModel):
     target_fps: int = 12
     frame_jpeg_quality: int = 80
     live_stream_enabled: bool = True
+    model_weights: str = "yolov8n.pt"
+    model_confidence: float = 0.35
+    model_iou_threshold: float = 0.25
+    model_max_det: int = 25
+    model_device: str = "cpu"
     object_refresh_seconds: int = 5
     max_lost_target_seconds: int = 4
     suspicious_motion_threshold_pixels: int = 120
@@ -57,6 +62,17 @@ class TrackingConfig(BaseModel):
     reverse_distance_threshold_m: float = 1.2
     center_tolerance_px: int = 70
     command_cooldown_seconds: float = 0.6
+    forward_duration_seconds: float = 0.1
+    backward_duration_seconds: float = 0.1
+    left_duration_seconds: float = 0.1
+    right_duration_seconds: float = 0.1
+    forward_distance_m: float = 0.45
+    backward_distance_m: float = 0.45
+    left_turn_degrees: float = 14.0
+    right_turn_degrees: float = 14.0
+    origin_latitude: float | None = None
+    origin_longitude: float | None = None
+    start_heading_degrees: float = 0.0
 
 
 class AlertsConfig(BaseModel):

@@ -45,6 +45,14 @@ class SharedState:
             desired_distance_m=self.settings.tracking.desired_distance_m,
             last_update=now_local(),
         )
+        self.estimator.forward_distance_m = self.settings.tracking.forward_distance_m
+        self.estimator.backward_distance_m = self.settings.tracking.backward_distance_m
+        self.estimator.left_turn_degrees = self.settings.tracking.left_turn_degrees
+        self.estimator.right_turn_degrees = self.settings.tracking.right_turn_degrees
+        self.estimator.origin_latitude = self.settings.tracking.origin_latitude
+        self.estimator.origin_longitude = self.settings.tracking.origin_longitude
+        self.estimator.start_heading_degrees = self.settings.tracking.start_heading_degrees
+        self.estimator.heading_degrees = self.settings.tracking.start_heading_degrees
 
     def add_command(self, entry: CommandEntry) -> None:
         with self.lock:

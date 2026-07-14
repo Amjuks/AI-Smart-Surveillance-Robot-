@@ -323,6 +323,39 @@ h2 {
   gap: 8px;
 }
 
+.geo-input-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.geo-input-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.geo-input-grid input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.geo-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.geo-actions .btn {
+  min-width: 140px;
+}
+
 .distance-editor input {
   width: 100%;
 }
@@ -334,10 +367,38 @@ h2 {
   gap: 16px;
 }
 
-.tracking-card h3,
-.config-card h3 {
-  margin-bottom: 0;
+.distance-editor input,
+.motion-editor input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
 }
+
+.motion-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.motion-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.motion-row label {
+  display: grid;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.motion-row label input {
+  min-width: 0;
+}
+
 
 .manual-controls {
   display: grid;

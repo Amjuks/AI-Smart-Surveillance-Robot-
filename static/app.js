@@ -6,6 +6,8 @@ const state = {
   lastObjects: [],
   cameraStatus: "Offline",
   liveViewEnabled: true,
+  locationCaptured: false,
+  locationError: null,
 };
 
 const els = {
@@ -21,9 +23,13 @@ const els = {
   activeDistance: document.getElementById("activeDistance"),
   activeDirection: document.getElementById("activeDirection"),
   activeAction: document.getElementById("activeAction"),
-  distanceSlider: document.getElementById("distanceSlider"),
-  distanceValue: document.getElementById("distanceValue"),
-  saveDistanceBtn: document.getElementById("saveDistanceBtn"),
+  originCoordinates: document.getElementById("originCoordinates"),
+  robotGeoCoordinates: document.getElementById("robotGeoCoordinates"),
+  originStatus: document.getElementById("originStatus"),
+  originLatInput: document.getElementById("originLatInput"),
+  originLonInput: document.getElementById("originLonInput"),
+  saveOriginBtn: document.getElementById("saveOriginBtn"),
+  pickBrowserLocationBtn: document.getElementById("pickBrowserLocationBtn"),
   manualModeToggle: document.getElementById("manualModeToggle"),
   liveViewToggle: document.getElementById("liveViewToggle"),
   robotAlertBtn: document.getElementById("robotAlertBtn"),
@@ -76,8 +82,8 @@ function renderVideoFeedPreference(videoFeed) {
   els.liveViewToggle.checked = state.liveViewEnabled;
   if (!state.liveViewEnabled) {
     els.videoFeed.src = "/api/frame.jpg?disabled=1";
-  } else if (!els.videoFeed.src.includes("/api/frame.jpg")) {
-    els.videoFeed.src = `/api/frame.jpg?ts=${Date.now()}`;
+  } else if (!els.videoFeed.src.includes("/api/camera-stream")) {
+    els.videoFeed.src = `/api/camera-stream`;
   }
 }
 
@@ -88,8 +94,26 @@ function renderTracking(tracking) {
   els.activeDistance.textContent = tracking.target?.distance_m ? `${tracking.target.distance_m.toFixed(2)} m` : "--";
   els.activeDirection.textContent = tracking.target?.direction || "--";
   els.activeAction.textContent = tracking.target?.robot_action || "S";
-  els.distanceSlider.value = tracking.desired_distance_m || 1.8;
-  els.distanceValue.textContent = `${Number(els.distanceSlider.value).toFixed(1)} m`;
+}
+
+function renderOrigin(origin, map) {
+  const originText = origin?.latitude != null && origin?.longitude != null ? `${origin.latitude.toFixed(6)}, ${origin.longitude.toFixed(6)}` : "--";
+  const robotGeo = map?.robot_geoposition ? map.robot_geoposition.join(", ") : "--";
+  if (els.originCoordinates) els.originCoordinates.textContent = originText;
+  if (els.robotGeoCoordinates) els.robotGeoCoordinates.textContent = robotGeo;
+  if (els.originLatInput) els.originLatInput.value = origin?.latitude != null ? origin.latitude.toFixed(6) : "";
+  if (els.originLonInput) els.originLonInput.value = origin?.longitude != null ? origin.longitude.toFixed(6) : "";
+  if (els.originStatus) {
+    if (origin?.latitude != null && origin?.longitude != null) {
+      els.originStatus.textContent = "Origin saved";
+    } else if (state.locationCaptured) {
+      els.originStatus.textContent = "Browser GPS captured";
+    } else if (state.locationError) {
+      els.originStatus.textContent = `GPS error: ${state.locationError}`;
+    } else {
+      els.originStatus.textContent = "Awaiting browser GPS";
+    }
+  }
 }
 
 function objectDetails(obj) {
@@ -108,7 +132,7 @@ function renderObjects(objects, tracking) {
   state.lastObjects = objects;
   if (!objects.length) {
     els.objectsContainer.innerHTML = `<div class="empty-state">${
-      state.cameraStatus === "Online" ? "No black objects detected yet" : "Camera offline or unreachable, so detections are paused"
+      state.cameraStatus === "Online" ? "No objects detected yet" : "Camera offline or unreachable, so detections are paused"
     }</div>`;
     return;
   }
@@ -184,6 +208,8 @@ function renderHistory(history) {
           <td>${entry.reason}</td>
           <td>${entry.target_label || "--"}</td>
           <td>${entry.estimated_distance_m ? `${entry.estimated_distance_m.toFixed(2)} m` : "--"}</td>
+          <td>${entry.movement_amount_m ? `${entry.movement_amount_m.toFixed(2)} m` : "--"}</td>
+          <td>${entry.rotation_degrees ? `${entry.rotation_degrees.toFixed(1)}°` : "--"}</td>
           <td>${entry.direction || "--"}</td>
           <td>${entry.mode}</td>
           <td>${entry.success ? "OK" : "Failed"}</td>
@@ -211,9 +237,15 @@ function renderAlerts(alerts) {
 
 function renderMap(map) {
   els.mapImage.src = `/api/map/image?ts=${Date.now()}`;
+  const robotGeo = map.robot_geoposition ? map.robot_geoposition.join(", ") : "--";
+  const originGeo = map.origin_geoposition ? map.origin_geoposition.join(", ") : "--";
+  const locationSource = map.origin_geoposition ? "Browser GPS" : "Awaiting browser location";
   els.mapStats.innerHTML = `
     <span>Mode: <strong>${map.mode}</strong></span>
     <span>Robot Position: <strong>${map.robot_position.join(", ")}</strong></span>
+    <span>Robot Geo: <strong>${robotGeo}</strong></span>
+    <span>Origin Geo: <strong>${originGeo}</strong></span>
+    <span>Location Source: <strong>${locationSource}</strong></span>
     <span>Target Position: <strong>${map.target_position ? map.target_position.join(", ") : "--"}</strong></span>
     <span>Heading: <strong>${map.heading_degrees}°</strong></span>
     <span>Target Bearing: <strong>${map.target_bearing_degrees ?? "--"}°</strong></span>
@@ -242,6 +274,7 @@ async function refreshDashboard() {
     renderHistory(data.history || []);
     renderAlerts(data.alerts || []);
     renderMap(data.map);
+    renderOrigin(data.origin || {}, data.map);
   } catch (error) {
     console.error(error);
   }
@@ -249,7 +282,57 @@ async function refreshDashboard() {
 
 function refreshFrame() {
   if (!state.liveViewEnabled) return;
-  els.videoFeed.src = `/api/frame.jpg?ts=${Date.now()}`;
+  if (!els.videoFeed.src.includes("/api/camera-stream")) {
+    els.videoFeed.src = "/api/camera-stream";
+  }
+}
+
+async function saveOrigin() {
+  try {
+    const latitude = Number(els.originLatInput.value);
+    const longitude = Number(els.originLonInput.value);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      throw new Error("Latitude and longitude are required to save origin.");
+    }
+    await fetchJson("/api/config/origin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ latitude, longitude }),
+    });
+    state.locationCaptured = true;
+    state.locationError = null;
+    await refreshDashboard();
+  } catch (error) {
+    console.error(error);
+    state.locationError = error.message;
+    if (els.originStatus) {
+      els.originStatus.textContent = `Origin error: ${error.message}`;
+    }
+  }
+}
+
+async function captureCurrentLocation() {
+  if (!navigator.geolocation) {
+    state.locationError = "Geolocation not supported";
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      const { latitude, longitude } = position.coords;
+      if (els.originLatInput) els.originLatInput.value = latitude.toFixed(6);
+      if (els.originLonInput) els.originLonInput.value = longitude.toFixed(6);
+      state.locationCaptured = true;
+      state.locationError = null;
+      await saveOrigin();
+    },
+    (error) => {
+      state.locationError = error.message;
+      console.warn("Geolocation error:", error.message);
+      if (els.originStatus) els.originStatus.textContent = `GPS error: ${error.message}`;
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+  );
 }
 
 async function sendManualCommand(command) {
@@ -289,22 +372,17 @@ async function setMode(mode) {
   }
 }
 
-els.distanceSlider.addEventListener("input", () => {
-  els.distanceValue.textContent = `${Number(els.distanceSlider.value).toFixed(1)} m`;
-});
+if (els.saveOriginBtn) {
+  els.saveOriginBtn.addEventListener("click", async () => {
+    await saveOrigin();
+  });
+}
 
-els.saveDistanceBtn.addEventListener("click", async () => {
-  try {
-    await fetchJson("/api/config/distance", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ desired_distance_m: Number(els.distanceSlider.value) }),
-    });
-    await refreshDashboard();
-  } catch (error) {
-    console.error(error);
-  }
-});
+if (els.pickBrowserLocationBtn) {
+  els.pickBrowserLocationBtn.addEventListener("click", async () => {
+    await captureCurrentLocation();
+  });
+}
 
 els.manualModeToggle.addEventListener("change", async (event) => {
   const mode = event.target.checked ? "manual" : "tracking";
@@ -373,6 +451,7 @@ async function boot() {
     <div class="skeleton-card"></div>
     <div class="skeleton-card"></div>
   `;
+  await captureCurrentLocation();
   await refreshDashboard();
   refreshFrame();
 
@@ -381,13 +460,7 @@ async function boot() {
     window.setTimeout(dashboardLoop, state.dashboardRefreshMs);
   };
 
-  const frameLoop = () => {
-    refreshFrame();
-    window.setTimeout(frameLoop, state.frameRefreshMs);
-  };
-
   window.setTimeout(dashboardLoop, state.dashboardRefreshMs);
-  window.setTimeout(frameLoop, state.frameRefreshMs);
 }
 
 boot();

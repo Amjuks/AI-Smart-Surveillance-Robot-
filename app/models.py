@@ -51,6 +51,11 @@ class DistanceConfigRequest(BaseModel):
     desired_distance_m: float = Field(gt=0.1, lt=10.0)
 
 
+class OriginConfigRequest(BaseModel):
+    latitude: float = Field(ge=-90.0, le=90.0)
+    longitude: float = Field(ge=-180.0, le=180.0)
+
+
 class VideoFeedConfigRequest(BaseModel):
     enabled: bool
 
@@ -63,6 +68,8 @@ class CommandEntry(BaseModel):
     estimated_distance_m: float | None = None
     direction: str | None = None
     mode: ModeType
+    movement_amount_m: float | None = None
+    rotation_degrees: float | None = None
     success: bool = True
 
 
@@ -113,6 +120,8 @@ class MapPoint(BaseModel):
 class MapSnapshot(BaseModel):
     mode: ModeType
     robot_position: list[float]
+    robot_geoposition: list[float] | None = None
+    origin_geoposition: list[float] | None = None
     target_position: list[float] | None = None
     heading_degrees: float = 0
     path: list[list[float]] = Field(default_factory=list)

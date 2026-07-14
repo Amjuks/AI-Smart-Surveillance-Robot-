@@ -4,10 +4,12 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
 import requests
+from ultralytics import YOLO
 
 from app.config import Settings
 from app.models import AlertEntry, CommandEntry, Detection, TrackingTarget
@@ -75,6 +77,10 @@ class VisionEngine:
         self._tracked_color: str | None = None
         self._tracked_detection_id: str | None = None
         self._tracked_last_seen: object | None = None
+        model_path = Path(self.settings.vision.model_weights)
+        if not model_path.exists():
+            raise FileNotFoundError(f"YOLO model weights not found: {model_path}")
+        self.model = YOLO(str(model_path))
 
     def clear_tracking_memory(self) -> None:
         self._tracked_template_gray = None
@@ -176,7 +182,7 @@ class VisionEngine:
                 elapsed = max(time.time() - start_time, 1e-6)
                 fps = frame_count / elapsed
 
-                raw_detections = self._detect_black_objects(frame)
+                raw_detections = self._detect_objects(frame)
                 detections = self._stabilize_detections(raw_detections)
                 live_detections = [item for item in detections if not item.stale]
                 tracked_detection = self._handle_tracking(frame, live_detections)
@@ -206,58 +212,65 @@ class VisionEngine:
                 self._raise_alert("critical", "Backend error", f"Vision inference error: {exc}", cooldown_seconds=30)
                 time.sleep(0.3)
 
-    def _detect_black_objects(self, frame: np.ndarray) -> list[Detection]:
-        mask = self._build_black_mask(frame)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def _detect_objects(self, frame: np.ndarray) -> list[Detection]:
         detections: list[Detection] = []
-        frame_area = max(frame.shape[0] * frame.shape[1], 1)
-
-        for contour in contours:
-            area = int(cv2.contourArea(contour))
-            if area < self.settings.vision.min_black_area_px:
-                continue
-
-            x, y, w, h = cv2.boundingRect(contour)
-            x1, y1, x2, y2 = x, y, x + w, y + h
-            crop = frame[max(y1, 0) : max(y2, 0), max(x1, 0) : max(x2, 0)]
-            if crop.size == 0:
-                continue
-
-            fill_ratio = min(area / max(w * h, 1), 1.0)
-            size_ratio = min((w * h) / frame_area, 1.0)
-            confidence = round(min(0.55 + (fill_ratio * 0.3) + (size_ratio * 0.15), 0.99), 3)
-            distance_m = round(
-                (self.settings.tracking.distance_reference_width_px / max(w, 1)) * self.settings.tracking.desired_distance_m,
-                2,
+        try:
+            predictions = self.model.predict(
+                source=frame,
+                imgsz=640,
+                conf=self.settings.vision.model_confidence,
+                iou=self.settings.vision.model_iou_threshold,
+                max_det=self.settings.vision.model_max_det,
+                device=self.settings.vision.model_device,
+                augment=False,
+                verbose=False,
             )
-            detections.append(
-                Detection(
-                    detection_id=str(uuid.uuid4())[:8],
-                    label="Black Object",
-                    confidence=confidence,
-                    distance_m=distance_m,
-                    dominant_color="Black",
-                    bbox=[x1, y1, x2, y2],
-                    center=[x1 + (w // 2), y1 + (h // 2)],
-                    area=max(w * h, 1),
+        except Exception as exc:
+            self._raise_alert("warning", "Detection error", f"Object detection failed: {exc}", cooldown_seconds=15)
+            return []
+
+        for result in predictions:
+            boxes = result.boxes
+            if boxes is None or len(boxes) == 0:
+                continue
+
+            confs = boxes.conf.cpu().numpy() if hasattr(boxes.conf, "cpu") else boxes.conf.numpy()
+            classes = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else boxes.cls.numpy()
+            coords = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else boxes.xyxy.numpy()
+
+            for cls, conf, xyxy in zip(classes, confs, coords):
+                if conf < self.settings.vision.model_confidence:
+                    continue
+                x1, y1, x2, y2 = [int(round(x)) for x in xyxy]
+                x1 = max(0, x1)
+                y1 = max(0, y1)
+                x2 = min(frame.shape[1], x2)
+                y2 = min(frame.shape[0], y2)
+                width = max(x2 - x1, 1)
+                height = max(y2 - y1, 1)
+                crop = frame[y1:y2, x1:x2] if x2 > x1 and y2 > y1 else np.zeros((1, 1, 3), dtype=np.uint8)
+                dominant_color = self._dominant_color_name(crop)
+                label = self.model.names.get(int(cls), str(int(cls))) if hasattr(self.model, "names") else str(int(cls))
+                distance_m = round(
+                    (self.settings.tracking.distance_reference_width_px / width) * self.settings.tracking.desired_distance_m,
+                    2,
                 )
-            )
+                detections.append(
+                    Detection(
+                        detection_id=str(uuid.uuid4())[:8],
+                        label=label,
+                        confidence=round(float(conf), 3),
+                        distance_m=distance_m,
+                        dominant_color=dominant_color,
+                        bbox=[x1, y1, x2, y2],
+                        center=[x1 + (width // 2), y1 + (height // 2)],
+                        area=max(width * height, 1),
+                    )
+                )
 
-        detections.sort(key=lambda item: item.area, reverse=True)
+        detections.sort(key=lambda item: item.confidence, reverse=True)
         return detections
 
-    def _build_black_mask(self, frame: np.ndarray) -> np.ndarray:
-        blurred = cv2.GaussianBlur(frame, (5, 5), 0)
-        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-        value_mask = cv2.inRange(hsv[:, :, 2], 0, self.settings.vision.black_value_threshold)
-        saturation_mask = cv2.inRange(hsv[:, :, 1], 0, self.settings.vision.black_saturation_threshold)
-        mask = cv2.bitwise_and(value_mask, saturation_mask)
-
-        kernel_size = max(self.settings.vision.morph_kernel_size, 1)
-        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        return mask
 
     def _stabilize_detections(self, detections: list[Detection]) -> list[Detection]:
         now = now_local()
@@ -600,6 +613,7 @@ class VisionEngine:
         return "Mixed"
 
     def _log_command(self, command: str, reason: str, detection: Detection | None, success: bool) -> None:
+        movement_amount_m, rotation_degrees = self.robot.movement_metadata(command)
         entry = CommandEntry(
             timestamp=now_local(),
             command=command,
@@ -608,6 +622,8 @@ class VisionEngine:
             estimated_distance_m=detection.distance_m if detection else None,
             direction=self.tracker.direction_for_target(640, detection.center[0]) if detection else None,
             mode=self.state.mode,
+            movement_amount_m=movement_amount_m,
+            rotation_degrees=rotation_degrees,
             success=success,
         )
         self.state.add_command(entry)
